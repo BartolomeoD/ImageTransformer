@@ -9,7 +9,6 @@ namespace Kontur.ImageTransformer
             using (var server = new AsyncHttpServer())
             {
                 server.Start("http://+:8080/");
-                server.QueueSize = Environment.ProcessorCount * 3;
                 Console.ReadKey(true);
             }
         }

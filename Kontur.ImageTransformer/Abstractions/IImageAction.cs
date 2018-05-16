@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 
 namespace Kontur.ImageTransformer.Abstractions
 {
-    interface IImageAction
+    public  interface IImageAction
     {
-        IResponse Apply(byte[] imagePixels);
+        unsafe void  Apply(byte* reqStart, byte* resPixel, int x, int y, int width, int height);
     }
 }

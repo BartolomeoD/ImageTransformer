@@ -1,13 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Net;
 
 namespace Kontur.ImageTransformer.Abstractions
 {
-    interface IResponse
+    public interface IResponse
     {
-        public void Execute();
+        /// <summary>
+        ///  Executes response
+        /// </summary>
+        /// <param name="response"></param>
+        void Execute(HttpListenerResponse response);
     }
 }

@@ -1,5 +1,9 @@
-﻿using System;
+﻿using Kontur.ImageTransformer.Responses;
+using Kontur.ImageTransformer.Routing;
+using System;
 using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading;
@@ -11,8 +15,10 @@ namespace Kontur.ImageTransformer
     {
         public AsyncHttpServer()
         {
+            QueueSize = Environment.ProcessorCount*3; 
             listener = new HttpListener();
-            RequestsQueue = new Queue();
+            RequestsQueue = new ConcurrentQueue<HttpListenerContext>();
+            ExecuterThreads = new Thread[Environment.ProcessorCount];
         }
         
         public void Start(string prefix)
@@ -31,15 +37,17 @@ namespace Kontur.ImageTransformer
                         Priority = ThreadPriority.Highest
                     };
 
-                    ExecuterThread = new Thread(ExecuteFromRequestsQueue)
-                    {
-                        IsBackground = true,
-                        Priority = ThreadPriority.Highest
-                    };
-
                     listenerThread.Start();
-                    ExecuterThread.Start();
-                    
+
+                    for (int i = 0; i < ExecuterThreads.Length; i++)
+                    {
+                        ExecuterThreads[i] = new Thread(ExecuteFromRequestsQueue)
+                        {
+                            IsBackground = true,
+                            Priority = ThreadPriority.BelowNormal
+                        };
+                        ExecuterThreads[i].Start();
+                    }
                     isRunning = true;
                 }
             }
@@ -79,14 +87,18 @@ namespace Kontur.ImageTransformer
             {
                 try
                 {
-                    if (listener.IsListening && RequestsQueue.Count < QueueSize)
-                    {
+                    if (listener.IsListening) {
                         var context = listener.GetContext();
-                        RequestsQueue.Enqueue(context);
-                    }
-                    else
-                    {
-
+                        if (queueLength < QueueSize)
+                        {
+                            RequestsQueue.Enqueue(context);
+                            Interlocked.Increment(ref queueLength);
+                        }
+                        else
+                        {
+                            var response = new StatusCode(429);  //429
+                            response.Execute(context.Response);
+                        }
                     }
                 }
                 catch (ThreadAbortException)
@@ -102,46 +114,40 @@ namespace Kontur.ImageTransformer
 
         private void ExecuteFromRequestsQueue()
         {
-
             while (true)
             {
                 try
                 {
-                    if (listener.IsListening && RequestsQueue.Count > 0)
+                    if (queueLength > 0 && listener.IsListening)
                     {
-                        var context = listener.GetContext();
-                        Task.Run(() => HandleContextAsync((HttpListenerContext)RequestsQueue.Dequeue()));
+                        if (!RequestsQueue.TryDequeue(out var context))
+                            continue;
+                        Interlocked.Decrement(ref queueLength);
+                        Task.Run(() =>
+                        {
+                            var response = Router.Route(context.Request);
+                            response.Execute(context.Response);
+                        });
                     }
-                    else Thread.Sleep(0);
+                    else
+                        Thread.Sleep(10);
                 }
                 catch (ThreadAbortException)
                 {
                     return;
                 }
-                catch (Exception error)
-                {
-                    Console.WriteLine(error.Message);
-                }
             }
-        }
-
-        private async Task HandleContextAsync(HttpListenerContext listenerContext)
-        {
-            // TODO: implement request handling
-
-            listenerContext.Response.StatusCode = (int)HttpStatusCode.OK;
-            using (var writer = new StreamWriter(listenerContext.Response.OutputStream))
-                writer.WriteLine("Hello, world!");
         }
 
         public int QueueSize;
 
-
         private readonly HttpListener listener;
 
-        private Queue RequestsQueue;
+        private int queueLength = 0;
+
+        private ConcurrentQueue<HttpListenerContext> RequestsQueue;
         private Thread listenerThread;
-        private Thread ExecuterThread;
+        private Thread[] ExecuterThreads;
         private bool disposed;
         private volatile bool isRunning;
     }
